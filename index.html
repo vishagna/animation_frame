@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simple Frame Animation Tester</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial;}
+    body{margin:0;padding:16px;background:#f6f8fb;color:#111}
+    .wrap{display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start}
+    .panel{background:#fff;border-radius:10px;padding:12px;box-shadow:0 6px 18px rgba(20,30,60,0.08)}
+    h2{margin:6px 0 12px;font-size:16px}
+
+    /* Drop zone */
+    .drop{border:2px dashed #d0d7e6;border-radius:8px;padding:12px;text-align:center;min-height:80px;display:flex;align-items:center;justify-content:center}
+    .drop.dragover{background:#eef6ff;border-color:#78a9ff}
+
+    /* Frame list */
+    .frames{margin-top:12px;display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto;padding-right:6px}
+    .frame{display:flex;gap:8px;align-items:center;padding:6px;border-radius:8px;border:1px solid #eef2f7}
+    .thumb{width:56px;height:40px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
+    .meta{flex:1;min-width:0}
+    .name{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .controls{display:flex;gap:6px}
+    button{background:#0b63ff;color:#fff;border:0;padding:8px 10px;border-radius:8px;cursor:pointer}
+    button.ghost{background:transparent;color:#111;border:1px solid #e1e6f0}
+    button.remove{background:#ff4d4f}
+    input[type=number]{width:80px;padding:6px;border-radius:8px;border:1px solid #dfe7f5}
+    label{font-size:13px}
+
+    /* Preview area */
+    .preview-wrap{display:flex;flex-direction:column;height:100%}
+    .preview-canvas{background:#111;border-radius:8px;width:100%;height:420px;display:block}
+    .preview-controls{display:flex;align-items:center;gap:12px;margin-top:10px}
+    .small{padding:6px 8px;border-radius:8px}
+    .muted{color:#6b7280}
+    .list-empty{padding:12px;text-align:center;color:#6b7280}
+
+    /* footer */
+    .footer{margin-top:12px;font-size:12px;color:#6b7280}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h2>Frames</h2>
+
+      <div id="drop" class="drop">Drop images here or <label style="color:#0b63ff;cursor:pointer"><input id="fileInput" type="file" accept="image/*" multiple style="display:none">choose files</label></div>
+
+      <div class="frames" id="framesList"></div>
+
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center;justify-content:space-between">
+        <div style="display:flex;gap:8px;align-items:center">
+          <label for="fps">FPS</label>
+          <input id="fps" type="number" min="1" value="12">
+          <label class="muted" style="margin-left:8px">(frames per second)</label>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button id="sortBtn" class="ghost small">Sort</button>
+          <button id="clearAll" class="ghost small">Clear all</button>
+        </div>
+      </div>
+
+      <div class="footer">Features: drag to reorder, remove frames, shows original filename (without extension), set frame rate, play/pause preview.</div>
+    </div>
+
+    <div class="panel preview-wrap">
+      <h2>Preview</h2>
+      <canvas id="canvas" class="preview-canvas"></canvas>
+
+      <div class="preview-controls">
+        <button id="playPause">Play</button>
+        <button id="stepBack" class="ghost small">◀</button>
+        <button id="stepForward" class="ghost small">▶</button>
+        <label class="muted">Loop</label>
+        <input id="loop" type="checkbox" checked>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <div class="muted">Frame:</div>
+          <div id="frameIndex">0 / 0</div>
+        </div>
+      </div>
+
+      <div id="emptyHint" class="list-empty">No frames loaded — drop images or click "choose files".</div>
+    </div>
+  </div>
+
+  <!-- SortableJS for drag reorder -->
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+  <script>
+    // Simple frame animation player
+    const drop = document.getElementById('drop');
+    const fileInput = document.getElementById('fileInput');
+    const framesList = document.getElementById('framesList');
+    const fpsInput = document.getElementById('fps');
+    const canvas = document.getElementById('canvas');
+    const playPauseBtn = document.getElementById('playPause');
+    const frameIndexEl = document.getElementById('frameIndex');
+    const clearAllBtn = document.getElementById('clearAll');
+    const emptyHint = document.getElementById('emptyHint');
+    const stepBackBtn = document.getElementById('stepBack');
+    const stepForwardBtn = document.getElementById('stepForward');
+    const loopToggle = document.getElementById('loop');
+    const sortBtn = document.getElementById('sortBtn');
+
+    const ctx = canvas.getContext('2d');
+    let frames = []; // {name, url, image}
+    let playing = false;
+    let current = 0;
+    let timer = null;
+
+    function resizeCanvas() {
+      // keep aspect ratio 16:9 inside container height
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.max(200, Math.floor(rect.width));
+      canvas.height = Math.max(120, Math.floor(rect.height));
+      draw();
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    function fileNameWithoutExt(name){
+      return name.replace(/\.[^/.]+$/, "");
+    }
+
+    function addFiles(fileList){
+      const arr = Array.from(fileList).filter(f => f.type.startsWith('image'));
+      if(arr.length === 0) return;
+      arr.forEach(f => {
+        const url = URL.createObjectURL(f);
+        const name = fileNameWithoutExt(f.name);
+        const img = new Image();
+        img.onload = () => {
+          // store once loaded for proper drawing
+          frames.push({name, url, image: img, fileName: f.name});
+          renderList();
+          updateEmptyHint();
+          if(frames.length === 1) { // start showing first frame
+            draw();
+          }
+        }
+        img.onerror = ()=>{ URL.revokeObjectURL(url); };
+        img.src = url;
+      });
+    }
+
+    // Drop and choose
+    ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('dragover');}));
+    ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('dragover');}));
+    drop.addEventListener('drop',e=>{ const dt = e.dataTransfer; if(dt && dt.files) addFiles(dt.files); });
+    fileInput.addEventListener('change',e=>{ addFiles(e.target.files); fileInput.value = ''; });
+
+    // Render list
+    function renderList(){
+      framesList.innerHTML = '';
+      frames.forEach((f, idx) => {
+        const el = document.createElement('div'); el.className='frame'; el.dataset.index = idx;
+        const img = document.createElement('img'); img.className='thumb'; img.src = f.url;
+        const meta = document.createElement('div'); meta.className='meta';
+        const name = document.createElement('div'); name.className='name'; name.textContent = f.name;
+        const fnameSmall = document.createElement('div'); fnameSmall.className='muted'; fnameSmall.style.fontSize='12px'; fnameSmall.textContent = f.fileName;
+        meta.appendChild(name);
+        meta.appendChild(fnameSmall);
+        const ctrl = document.createElement('div'); ctrl.className='controls';
+        const up = document.createElement('button'); up.className='ghost small'; up.textContent='↑'; up.title='Move up'; up.onclick = ()=>move(idx, idx-1);
+        const down = document.createElement('button'); down.className='ghost small'; down.textContent='↓'; down.title='Move down'; down.onclick = ()=>move(idx, idx+1);
+        const remove = document.createElement('button'); remove.className='remove small'; remove.textContent='Remove'; remove.onclick = ()=>removeAt(idx);
+        ctrl.appendChild(up); ctrl.appendChild(down); ctrl.appendChild(remove);
+        el.appendChild(img); el.appendChild(meta); el.appendChild(ctrl);
+        framesList.appendChild(el);
+      });
+      refreshSortable();
+      updateFrameIndexDisplay();
+    }
+
+    function updateEmptyHint(){ emptyHint.style.display = frames.length ? 'none' : 'block'; }
+
+    function move(from, to){
+      if(to < 0 || to >= frames.length) return;
+      const item = frames.splice(from,1)[0];
+      frames.splice(to,0,item);
+      current = Math.max(0, Math.min(current, frames.length-1));
+      renderList();
+      draw();
+    }
+
+    function removeAt(idx){
+      if(!frames[idx]) return;
+      URL.revokeObjectURL(frames[idx].url);
+      frames.splice(idx,1);
+      if(current >= frames.length) current = Math.max(0, frames.length-1);
+      renderList();
+      updateEmptyHint();
+      draw();
+    }
+
+    function clearAll(){ frames.forEach(f=>URL.revokeObjectURL(f.url)); frames=[]; current=0; stop(); renderList(); updateEmptyHint(); draw(); }
+    clearAllBtn.addEventListener('click', clearAll);
+
+    // Sortable for drag-drop reordering
+    let sortable = null;
+    function refreshSortable(){
+      if(sortable) {
+        sortable.destroy(); sortable = null;
+      }
+      sortable = new Sortable(framesList, {
+        animation: 150,
+        onEnd: ()=>{
+          // rebuild frames based on DOM order
+          const nodes = Array.from(framesList.children);
+          const newFrames = nodes.map(n => frames[Number(n.dataset.index)]);
+          frames = newFrames.filter(Boolean);
+          renderList();
+        }
+      });
+    }
+
+    //Auto sort button
+    sortBtn.addEventListener('click', ()=>{
+      frames.sort((a,b) => a.name.localeCompare(b.name));
+      current = 0;
+      renderList();
+      draw();
+    });
+
+    // Drawing and playing
+    function draw(){
+      resizeCanvasIfNeeded();
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if(frames.length === 0) {
+        ctx.fillStyle = '#111';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('No frames loaded', 20, 40);
+        updateFrameIndexDisplay();
+        return;
+      }
+      const img = frames[current].image;
+      if(!img) return;
+      // fit image into canvas while preserving aspect ratio, centered
+      const cw = canvas.width, ch = canvas.height;
+      const iw = img.width, ih = img.height;
+      const r = Math.min(cw/iw, ch/ih);
+      const w = iw * r, h = ih * r;
+      const x = (cw - w)/2, y = (ch - h)/2;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, x, y, w, h);
+      updateFrameIndexDisplay();
+    }
+
+    function resizeCanvasIfNeeded(){
+      // Calculate desired resolution based on first image if available
+      if(frames.length > 0 && frames[0].image) {
+        // limit the canvas to container size; canvas element sized by CSS but we already set width/height on resize
+      }
+    }
+
+    function updateFrameIndexDisplay(){
+      frameIndexEl.textContent = frames.length ? (current+1) + ' / ' + frames.length : '0 / 0';
+    }
+
+    function play(){
+      if(frames.length <= 0) return;
+      const fps = Math.max(1, Number(fpsInput.value) || 12);
+      const interval = 1000 / fps;
+      stop();
+      playing = true; playPauseBtn.textContent='Pause';
+      timer = setInterval(()=>{
+        current++;
+        if(current >= frames.length){
+          if(loopToggle.checked) current = 0; else { current = frames.length-1; stop(); }
+        }
+        draw();
+      }, interval);
+    }
+    function stop(){ playing=false; playPauseBtn.textContent='Play'; if(timer){ clearInterval(timer); timer=null; } }
+
+    playPauseBtn.addEventListener('click', ()=>{ if(playing) stop(); else play(); });
+    fpsInput.addEventListener('change', ()=>{ if(playing) play(); });
+    stepBackBtn.addEventListener('click', ()=>{ if(frames.length>0){ current = (current-1+frames.length)%frames.length; draw(); }});
+    stepForwardBtn.addEventListener('click', ()=>{ if(frames.length>0){ current = (current+1)%frames.length; draw(); }});
+
+    // initial resize and hint
+    resizeCanvas(); updateEmptyHint();
+
+    // allow clicking frames to select current
+    framesList.addEventListener('click', e=>{
+      const el = e.target.closest('.frame'); if(!el) return; const idx = Number(el.dataset.index); if(!isNaN(idx)) { current = idx; draw(); }
+    });
+
+    // cleanup object URLs on page unload
+    window.addEventListener('beforeunload', ()=> frames.forEach(f=>URL.revokeObjectURL(f.url)));
+  </script>
+</body>
+</html>
