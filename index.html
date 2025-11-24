@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Simple Frame Animation Tester</title>
+  <title>Frame Animation to GIF</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
   <style>
     :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial;}
     body{margin:0;padding:16px;background:#f6f8fb;color:#111}
@@ -22,9 +23,13 @@
     .meta{flex:1;min-width:0}
     .name{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .controls{display:flex;gap:6px}
-    button{background:#0b63ff;color:#fff;border:0;padding:8px 10px;border-radius:8px;cursor:pointer}
+    button{background:#0b63ff;color:#fff;border:0;padding:8px 10px;border-radius:8px;cursor:pointer;transition:0.2s}
+    button:hover{opacity:0.9}
+    button:disabled{background:#ccc;cursor:not-allowed}
     button.ghost{background:transparent;color:#111;border:1px solid #e1e6f0}
+    button.ghost:hover{background:#f0f4f8}
     button.remove{background:#ff4d4f}
+    button.success{background:#10b981} /* Style cho nút Export */
     input[type=number]{width:80px;padding:6px;border-radius:8px;border:1px solid #dfe7f5}
     label{font-size:13px}
 
@@ -38,9 +43,20 @@
 
     /* footer */
     .footer{margin-top:12px;font-size:12px;color:#6b7280}
+    
+    /* Overlay loading */
+    .loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.8);z-index:99;align-items:center;justify-content:center;flex-direction:column}
+    .loading-overlay.active{display:flex}
+    .spinner{width:30px;height:30px;border:3px solid #ccc;border-top-color:#0b63ff;border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
+  <div class="loading-overlay" id="loader">
+    <div class="spinner"></div>
+    <div style="margin-top:10px;font-weight:600" id="loaderText">Rendering GIF...</div>
+  </div>
+
   <div class="wrap">
     <div class="panel">
       <h2>Frames</h2>
@@ -53,7 +69,6 @@
         <div style="display:flex;gap:8px;align-items:center">
           <label for="fps">FPS</label>
           <input id="fps" type="number" min="1" value="12">
-          <label class="muted" style="margin-left:8px">(frames per second)</label>
         </div>
         <div style="display:flex;gap:8px">
           <button id="sortBtn" class="ghost small">Sort</button>
@@ -61,11 +76,15 @@
         </div>
       </div>
 
-      <div class="footer">Features: drag to reorder, remove frames, shows original filename (without extension), set frame rate, play/pause preview.</div>
+      <div class="footer">Features: drag to reorder, remove frames, shows original filename, set frame rate, export GIF.</div>
     </div>
 
     <div class="panel preview-wrap">
-      <h2>Preview</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h2 style="margin:0">Preview</h2>
+          <button id="exportGif" class="success small">Export GIF</button>
+      </div>
+      
       <canvas id="canvas" class="preview-canvas"></canvas>
 
       <div class="preview-controls">
@@ -84,7 +103,6 @@
     </div>
   </div>
 
-  <!-- SortableJS for drag reorder -->
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   <script>
     // Simple frame animation player
@@ -101,15 +119,19 @@
     const stepForwardBtn = document.getElementById('stepForward');
     const loopToggle = document.getElementById('loop');
     const sortBtn = document.getElementById('sortBtn');
+    
+    // New elements for GIF Export
+    const exportGifBtn = document.getElementById('exportGif');
+    const loader = document.getElementById('loader');
+    const loaderText = document.getElementById('loaderText');
 
     const ctx = canvas.getContext('2d');
-    let frames = []; // {name, url, image}
+    let frames = []; // {name, url, image, fileName}
     let playing = false;
     let current = 0;
     let timer = null;
 
     function resizeCanvas() {
-      // keep aspect ratio 16:9 inside container height
       const rect = canvas.getBoundingClientRect();
       canvas.width = Math.max(200, Math.floor(rect.width));
       canvas.height = Math.max(120, Math.floor(rect.height));
@@ -129,13 +151,10 @@
         const name = fileNameWithoutExt(f.name);
         const img = new Image();
         img.onload = () => {
-          // store once loaded for proper drawing
           frames.push({name, url, image: img, fileName: f.name});
           renderList();
           updateEmptyHint();
-          if(frames.length === 1) { // start showing first frame
-            draw();
-          }
+          if(frames.length === 1) { draw(); }
         }
         img.onerror = ()=>{ URL.revokeObjectURL(url); };
         img.src = url;
@@ -148,7 +167,6 @@
     drop.addEventListener('drop',e=>{ const dt = e.dataTransfer; if(dt && dt.files) addFiles(dt.files); });
     fileInput.addEventListener('change',e=>{ addFiles(e.target.files); fileInput.value = ''; });
 
-    // Render list
     function renderList(){
       framesList.innerHTML = '';
       frames.forEach((f, idx) => {
@@ -157,11 +175,10 @@
         const meta = document.createElement('div'); meta.className='meta';
         const name = document.createElement('div'); name.className='name'; name.textContent = f.name;
         const fnameSmall = document.createElement('div'); fnameSmall.className='muted'; fnameSmall.style.fontSize='12px'; fnameSmall.textContent = f.fileName;
-        meta.appendChild(name);
-        meta.appendChild(fnameSmall);
+        meta.appendChild(name); meta.appendChild(fnameSmall);
         const ctrl = document.createElement('div'); ctrl.className='controls';
-        const up = document.createElement('button'); up.className='ghost small'; up.textContent='↑'; up.title='Move up'; up.onclick = ()=>move(idx, idx-1);
-        const down = document.createElement('button'); down.className='ghost small'; down.textContent='↓'; down.title='Move down'; down.onclick = ()=>move(idx, idx+1);
+        const up = document.createElement('button'); up.className='ghost small'; up.textContent='↑'; up.onclick = ()=>move(idx, idx-1);
+        const down = document.createElement('button'); down.className='ghost small'; down.textContent='↓'; down.onclick = ()=>move(idx, idx+1);
         const remove = document.createElement('button'); remove.className='remove small'; remove.textContent='Remove'; remove.onclick = ()=>removeAt(idx);
         ctrl.appendChild(up); ctrl.appendChild(down); ctrl.appendChild(remove);
         el.appendChild(img); el.appendChild(meta); el.appendChild(ctrl);
@@ -195,16 +212,12 @@
     function clearAll(){ frames.forEach(f=>URL.revokeObjectURL(f.url)); frames=[]; current=0; stop(); renderList(); updateEmptyHint(); draw(); }
     clearAllBtn.addEventListener('click', clearAll);
 
-    // Sortable for drag-drop reordering
     let sortable = null;
     function refreshSortable(){
-      if(sortable) {
-        sortable.destroy(); sortable = null;
-      }
+      if(sortable) { sortable.destroy(); sortable = null; }
       sortable = new Sortable(framesList, {
         animation: 150,
         onEnd: ()=>{
-          // rebuild frames based on DOM order
           const nodes = Array.from(framesList.children);
           const newFrames = nodes.map(n => frames[Number(n.dataset.index)]);
           frames = newFrames.filter(Boolean);
@@ -213,44 +226,37 @@
       });
     }
 
-    //Auto sort button
     sortBtn.addEventListener('click', ()=>{
       frames.sort((a,b) => a.name.localeCompare(b.name));
-      current = 0;
-      renderList();
-      draw();
+      current = 0; renderList(); draw();
     });
 
-    // Drawing and playing
     function draw(){
       resizeCanvasIfNeeded();
       ctx.clearRect(0,0,canvas.width,canvas.height);
       if(frames.length === 0) {
-        ctx.fillStyle = '#111';
-        ctx.font = '16px sans-serif';
+        ctx.fillStyle = '#111'; ctx.font = '16px sans-serif';
         ctx.fillText('No frames loaded', 20, 40);
         updateFrameIndexDisplay();
         return;
       }
       const img = frames[current].image;
       if(!img) return;
-      // fit image into canvas while preserving aspect ratio, centered
-      const cw = canvas.width, ch = canvas.height;
+      drawImageFit(ctx, img, canvas.width, canvas.height);
+      updateFrameIndexDisplay();
+    }
+    
+    // Helper to draw image fitted in a box (contain)
+    function drawImageFit(context, img, cw, ch) {
       const iw = img.width, ih = img.height;
       const r = Math.min(cw/iw, ch/ih);
       const w = iw * r, h = ih * r;
       const x = (cw - w)/2, y = (ch - h)/2;
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(img, x, y, w, h);
-      updateFrameIndexDisplay();
+      context.imageSmoothingEnabled = true; // Smooth for preview
+      context.drawImage(img, x, y, w, h);
     }
 
-    function resizeCanvasIfNeeded(){
-      // Calculate desired resolution based on first image if available
-      if(frames.length > 0 && frames[0].image) {
-        // limit the canvas to container size; canvas element sized by CSS but we already set width/height on resize
-      }
-    }
+    function resizeCanvasIfNeeded(){ }
 
     function updateFrameIndexDisplay(){
       frameIndexEl.textContent = frames.length ? (current+1) + ' / ' + frames.length : '0 / 0';
@@ -277,16 +283,93 @@
     stepBackBtn.addEventListener('click', ()=>{ if(frames.length>0){ current = (current-1+frames.length)%frames.length; draw(); }});
     stepForwardBtn.addEventListener('click', ()=>{ if(frames.length>0){ current = (current+1)%frames.length; draw(); }});
 
-    // initial resize and hint
     resizeCanvas(); updateEmptyHint();
 
-    // allow clicking frames to select current
     framesList.addEventListener('click', e=>{
       const el = e.target.closest('.frame'); if(!el) return; const idx = Number(el.dataset.index); if(!isNaN(idx)) { current = idx; draw(); }
     });
 
-    // cleanup object URLs on page unload
     window.addEventListener('beforeunload', ()=> frames.forEach(f=>URL.revokeObjectURL(f.url)));
+
+    // ------------------------------------------------
+    // GIF EXPORT LOGIC
+    // ------------------------------------------------
+    exportGifBtn.addEventListener('click', () => {
+      if (frames.length === 0) {
+        alert("Please add frames first!");
+        return;
+      }
+
+      // Stop playback if running
+      stop();
+
+      // Determine output size based on the first frame (Natural Size)
+      // This ensures high quality, not the small preview size.
+      const firstImg = frames[0].image;
+      const width = firstImg.naturalWidth;
+      const height = firstImg.naturalHeight;
+
+      // Show Loader
+      loader.classList.add('active');
+      loaderText.textContent = "Initializing GIF encoder...";
+
+      // Setup GIF.js
+      // Note: workerScript points to the CDN version compatible with the main script
+      const gif = new GIF({
+        workers: 2,
+        quality: 10, // 1-30, lower is better
+        width: width,
+        height: height,
+        workerScript: 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js',
+        background: '#000000' // Background color for mismatched aspect ratios
+      });
+
+      // Temporary canvas for drawing frames
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = width;
+      tempCanvas.height = height;
+      const tCtx = tempCanvas.getContext('2d');
+
+      // Add frames
+      const fps = Math.max(1, Number(fpsInput.value) || 12);
+      const delay = 1000 / fps;
+
+      frames.forEach((f, i) => {
+        // Clear canvas black
+        tCtx.fillStyle = "#000";
+        tCtx.fillRect(0, 0, width, height);
+        
+        // Draw image centered and contained within the first frame's dimensions
+        drawImageFit(tCtx, f.image, width, height);
+
+        // Add to GIF
+        gif.addFrame(tCtx, {copy: true, delay: delay});
+      });
+
+      // Events
+      gif.on('progress', (p) => {
+        loaderText.textContent = `Rendering: ${Math.round(p * 100)}%`;
+      });
+
+      gif.on('finished', (blob) => {
+        loader.classList.remove('active');
+        // Trigger download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'animation.gif';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        // Cleanup
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+      });
+
+      // Start processing
+      gif.render();
+    });
+
   </script>
 </body>
 </html>
