@@ -135,6 +135,8 @@
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
           <h2 style="margin:0">Preview</h2>
           <button id="openExportModalBtn" class="success small">Export GIF</button>
+          <button id="exportSpriteBtn" class="success small">Export Sprite Sheet</button>
+
       </div>
       
       <div class="canvas-container checkerboard" id="canvasContainer">
@@ -198,6 +200,7 @@
     const scaleValueDisplay = document.getElementById('scaleValue');
     const finalSizeDisplay = document.getElementById('finalSize');
     const exportBgInfo = document.getElementById('exportBgInfo');
+    const exportSpriteBtn = document.getElementById('exportSpriteBtn');
     
     const loader = document.getElementById('loader');
     const loaderText = document.getElementById('loaderText');
@@ -540,6 +543,56 @@
 
     // Init
     updateEmptyHint();
+
+    exportSpriteBtn.addEventListener('click', () => {
+      if(frames.length === 0) { alert("Please add frames first!"); return; }
+
+      stop();
+
+      const scale = Number(exportScaleInput.value) || 1;
+      const firstImg = frames[0].image;
+      const nw = firstImg.naturalWidth || firstImg.width;
+      const nh = firstImg.naturalHeight || firstImg.height;
+
+      const destW = nw * scale;
+      const destH = nh * scale;
+
+      // Sprite sheet canvas
+      const spriteCanvas = document.createElement('canvas');
+      spriteCanvas.width = destW * frames.length; // 1 hàng ngang
+      spriteCanvas.height = destH;
+      const sCtx = spriteCanvas.getContext('2d');
+      sCtx.imageSmoothingEnabled = false;
+
+      frames.forEach((f, i) => {
+          // Fill background
+          if(!bgSettings.isTransparent) {
+              sCtx.fillStyle = bgSettings.color;
+              sCtx.fillRect(i * destW, 0, destW, destH);
+          }
+
+          const iw = f.image.naturalWidth || f.image.width;
+          const ih = f.image.naturalHeight || f.image.height;
+
+          // Centering
+          const dx = i * destW + Math.floor((destW - iw*scale)/2);
+          const dy = Math.floor((destH - ih*scale)/2);
+
+          sCtx.drawImage(f.image, 0, 0, iw, ih, dx, dy, iw*scale, ih*scale);
+      });
+
+      // Export as PNG
+      spriteCanvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `sprite-${destW}x${destH}.png`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(()=>URL.revokeObjectURL(url), 1000);
+      });
+  });
 
   </script>
 </body>
