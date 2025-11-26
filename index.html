@@ -3,597 +3,143 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Pixel Perfect GIF Maker</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
-  <style>
-    :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial;}
-    body{margin:0;padding:16px;background:#f6f8fb;color:#111}
-    .wrap{display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start}
-    .panel{background:#fff;border-radius:10px;padding:12px;box-shadow:0 6px 18px rgba(20,30,60,0.08)}
-    h2{margin:6px 0 12px;font-size:16px}
-
-    /* Drop zone */
-    .drop{border:2px dashed #d0d7e6;border-radius:8px;padding:12px;text-align:center;min-height:80px;display:flex;align-items:center;justify-content:center}
-    .drop.dragover{background:#eef6ff;border-color:#78a9ff}
-
-    /* Frame list */
-    .frames{margin-top:12px;display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto;padding-right:6px}
-    .frame{display:flex;gap:8px;align-items:center;padding:6px;border-radius:8px;border:1px solid #eef2f7}
-    .thumb{width:56px;height:40px;object-fit:contain;border-radius:6px;background:#eee;flex-shrink:0; image-rendering: pixelated;}
-    .meta{flex:1;min-width:0}
-    .name{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .controls{display:flex;gap:6px}
-    button{background:#0b63ff;color:#fff;border:0;padding:8px 10px;border-radius:8px;cursor:pointer;transition:0.2s}
-    button:hover{opacity:0.9}
-    button:disabled{background:#ccc;cursor:not-allowed}
-    button.ghost{background:transparent;color:#111;border:1px solid #e1e6f0}
-    button.ghost:hover{background:#f0f4f8}
-    button.remove{background:#ff4d4f}
-    button.success{background:#10b981}
-    input[type=number]{width:80px;padding:6px;border-radius:8px;border:1px solid #dfe7f5}
-    label{font-size:13px}
-
-    /* Preview area */
-    .preview-wrap{display:flex;flex-direction:column;height:100%}
-    /* Canvas background handling */
-    .canvas-container {
-        border-radius:8px;
-        overflow: hidden;
-        border: 1px solid #eee;
-        background-color: #fff;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 420px;
-    }
-    .preview-canvas{display:block; image-rendering: pixelated;}
-    
-    /* Checkerboard pattern for transparency */
-    .checkerboard {
-        background-image: linear-gradient(45deg, #ddd 25%, transparent 25%), linear-gradient(-45deg, #ddd 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ddd 75%), linear-gradient(-45deg, transparent 75%, #ddd 75%);
-        background-size: 20px 20px;
-        background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
-        background-color: #fff;
-    }
-
-    .preview-controls{display:flex;align-items:center;gap:12px;margin-top:10px}
-    .bg-controls{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid #eee}
-    .small{padding:6px 8px;border-radius:8px}
-    .muted{color:#6b7280}
-    .list-empty{padding:12px;text-align:center;color:#6b7280}
-
-    /* footer */
-    .footer{margin-top:12px;font-size:12px;color:#6b7280}
-    
-    /* Overlay loading & Modal */
-    .overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99;align-items:center;justify-content:center;flex-direction:column}
-    .overlay.active{display:flex}
-    
-    .modal-box {background:#fff; padding:20px; border-radius:12px; width: 300px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);}
-    .modal-row {margin-bottom: 15px;}
-    .modal-actions {display:flex; justify-content: flex-end; gap: 10px; margin-top: 20px;}
-
-    .spinner{width:30px;height:30px;border:3px solid #ccc;border-top-color:#0b63ff;border-radius:50%;animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-  </style>
+  <title>Pixel Perfect Animation Preview</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="overlay" id="loader">
-    <div style="background:white;padding:20px;border-radius:10px;display:flex;flex-direction:column;align-items:center">
-        <div class="spinner"></div>
-        <div style="margin-top:10px;font-weight:600" id="loaderText">Rendering GIF...</div>
-    </div>
-  </div>
+<div class="wrap">
 
-  <div class="overlay" id="exportModal">
+  <!-- Export GIF Modal -->
+  <div class="overlay" id="exportGifModal">
     <div class="modal-box">
-        <h3 style="margin-top:0">Export Settings</h3>
-        
-        <div class="modal-row">
-            <label style="display:block;margin-bottom:5px;font-weight:600">Scale (Resolution)</label>
-            <div style="display:flex;gap:10px;align-items:center">
-                <input id="exportScale" type="range" min="1" max="10" value="10" style="flex:1">
-                <span id="scaleValue" style="font-weight:bold;width:30px">1x</span>
-            </div>
-            <div id="finalSize" class="muted" style="margin-top:5px;font-size:12px">Output: 0 x 0 px</div>
-        </div>
-
-        <div class="modal-row">
-            <label style="display:block;margin-bottom:5px;font-weight:600">Background</label>
-            <div id="exportBgInfo" style="font-size:13px; padding: 6px; background:#f4f4f4; border-radius: 6px;">
-                </div>
-        </div>
-
-        <div class="modal-actions">
-            <button class="ghost" id="cancelExport">Cancel</button>
-            <button class="success" id="confirmExport">Render GIF</button>
-        </div>
+      <h3>Export GIF</h3>
+      <div class="modal-row">
+        <label>Scale (1-10):</label>
+        <input type="number" id="gifScale" value="10" min="1" max="10">
+      </div>
+      <div class="modal-row">
+        <label>FPS:</label>
+        <input type="number" id="gifFps" value="12" min="1" max="60">
+      </div>
+      <div class="modal-row">
+        <label>Background:</label>
+        <label><input type="radio" name="gifBg" value="trans" checked> Transparent</label>
+        <label><input type="radio" name="gifBg" value="color"> Color</label>
+        <input type="color" id="gifBgColor" value="#000000">
+      </div>
+      <div class="modal-actions">
+        <button id="cancelGifExport" class="ghost">Cancel</button>
+        <button id="confirmGifExport" class="success">Export</button>
+      </div>
     </div>
   </div>
 
-  <div class="wrap">
-    <div class="panel">
-      <h2>Frames</h2>
-      <div id="drop" class="drop">Drop images here or <label style="color:#0b63ff;cursor:pointer"><input id="fileInput" type="file" accept="image/*" multiple style="display:none">choose files</label></div>
-
-      <div class="frames" id="framesList"></div>
-
-      <div style="display:flex;gap:8px;margin-top:12px;align-items:center;justify-content:space-between">
-        <div style="display:flex;gap:8px;align-items:center">
-          <label for="fps">FPS</label>
-          <input id="fps" type="number" min="1" value="12">
-        </div>
-        <div style="display:flex;gap:8px">
-          <button id="sortBtn" class="ghost small">Sort</button>
-          <button id="clearAll" class="ghost small">Clear all</button>
-        </div>
+    <!-- Export Sprite Sheet Modal -->
+  <div class="overlay" id="exportSpriteModal">
+    <div class="modal-box">
+      <h3>Export Sprite Sheet</h3>
+      <div class="modal-row">
+        <label>Scale (1-10):</label>
+        <input type="number" id="spriteScale" value="1" min="1" max="10">
       </div>
-      <div class="footer">Drag to reorder. Frames play in list order.</div>
-    </div>
-
-    <div class="panel preview-wrap">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h2 style="margin:0">Preview</h2>
-          <button id="openExportModalBtn" class="success small">Export GIF</button>
-          <button id="exportSpriteBtn" class="success small">Export Sprite Sheet</button>
-
+      <div class="modal-row">
+        <label>Background:</label>
+        <label><input type="radio" name="spriteBg" value="trans" checked> Transparent</label>
+        <label><input type="radio" name="spriteBg" value="color"> Color</label>
+        <input type="color" id="spriteBgColor" value="#000000">
       </div>
-      
-      <div class="canvas-container checkerboard" id="canvasContainer">
-        <canvas id="canvas" class="preview-canvas"></canvas>
+      <div class="modal-actions">
+        <button id="cancelSpriteExport" class="ghost">Cancel</button>
+        <button id="confirmSpriteExport" class="success">Export</button>
       </div>
-
-      <div class="preview-controls">
-        <button id="playPause">Play</button>
-        <button id="stepBack" class="ghost small">◀</button>
-        <button id="stepForward" class="ghost small">▶</button>
-        <label class="muted">Loop</label>
-        <input id="loop" type="checkbox" checked>
-        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-          <div class="muted">Frame:</div>
-          <div id="frameIndex">0 / 0</div>
-        </div>
-      </div>
-
-      <div class="bg-controls">
-        <label style="font-weight:600">Background:</label>
-        <label><input type="radio" name="bgType" value="trans" > Transparent</label>
-        <label><input type="radio" name="bgType" value="color" checked> Color</label>
-        <input type="color" id="bgColorPicker" value="#000000" disabled>
-      </div>
-
-      <div id="emptyHint" class="list-empty">No frames loaded.</div>
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-  <script>
-    // Elements
-    const drop = document.getElementById('drop');
-    const fileInput = document.getElementById('fileInput');
-    const framesList = document.getElementById('framesList');
-    const fpsInput = document.getElementById('fps');
-    const canvas = document.getElementById('canvas');
-    const canvasContainer = document.getElementById('canvasContainer');
-    const ctx = canvas.getContext('2d');
-    
-    // Playback UI
-    const playPauseBtn = document.getElementById('playPause');
-    const frameIndexEl = document.getElementById('frameIndex');
-    const clearAllBtn = document.getElementById('clearAll');
-    const emptyHint = document.getElementById('emptyHint');
-    const stepBackBtn = document.getElementById('stepBack');
-    const stepForwardBtn = document.getElementById('stepForward');
-    const loopToggle = document.getElementById('loop');
-    const sortBtn = document.getElementById('sortBtn');
-
-    // Background UI
-    const bgRadios = document.getElementsByName('bgType');
-    const bgColorPicker = document.getElementById('bgColorPicker');
-    
-    // Export UI
-    const openExportModalBtn = document.getElementById('openExportModalBtn');
-    const exportModal = document.getElementById('exportModal');
-    const cancelExportBtn = document.getElementById('cancelExport');
-    const confirmExportBtn = document.getElementById('confirmExport');
-    const exportScaleInput = document.getElementById('exportScale');
-    const scaleValueDisplay = document.getElementById('scaleValue');
-    const finalSizeDisplay = document.getElementById('finalSize');
-    const exportBgInfo = document.getElementById('exportBgInfo');
-    const exportSpriteBtn = document.getElementById('exportSpriteBtn');
-    
-    const loader = document.getElementById('loader');
-    const loaderText = document.getElementById('loaderText');
-
-    ctx.imageSmoothingEnabled = false;
-
-    // State
-    let frames = []; 
-    let playing = false;
-    let current = 0;
-    let timer = null;
-    let bgSettings = { isTransparent: true, color: '#ffffff' };
-
-    // --- Background Handling ---
-    function updateBackgroundState() {
-        // Read radio buttons
-        let isTrans = true;
-        for(let r of bgRadios) { if(r.checked && r.value === 'color') isTrans = false; }
-        
-        bgSettings.isTransparent = isTrans;
-        bgSettings.color = bgColorPicker.value;
-
-        // Update Picker UI
-        bgColorPicker.disabled = isTrans;
-
-        // Update Canvas Container CSS (Visual Preview)
-        if (isTrans) {
-            canvasContainer.classList.add('checkerboard');
-            canvasContainer.style.backgroundColor = '';
-        } else {
-            canvasContainer.classList.remove('checkerboard');
-            canvasContainer.style.backgroundColor = bgSettings.color;
-        }
-    }
-
-    bgRadios.forEach(r => r.addEventListener('change', updateBackgroundState));
-    bgColorPicker.addEventListener('input', updateBackgroundState);
-    // Initial call
-    updateBackgroundState();
 
 
-    // --- Core Animation Logic ---
+  <!-- LEFT: Groups & Frames -->
+  <div class="panel">
+    <div class="group-header">
+      <h2>Groups</h2>
+      <div class="group-add">
+        <input id="newGroupName" placeholder="New group">
+        <button id="addGroupBtn" class="small">Add</button>
+      </div>
+    </div>
 
-    function resizeCanvas() {
-        // Just fit image logic, actual drawing handles scaling
-        if (frames.length > 0) draw();
-    }
+    <!-- Groups list (dọc) -->
+    <div class="groups" id="groupsList"></div>
 
-    function fileNameWithoutExt(name){
-      return name.replace(/\.[^/.]+$/, "");
-    }
+    <!-- Drop / File input -->
+    <div class="drop" id="drop">
+      Drop images here or
+      <label>
+        <input id="fileInput" type="file" accept="image/*" multiple>
+        choose files
+      </label>
+    </div>
 
-    function addFiles(fileList){
-      const arr = Array.from(fileList).filter(f => f.type.startsWith('image'));
-      if(arr.length === 0) return;
-      arr.forEach(f => {
-        const url = URL.createObjectURL(f);
-        const name = fileNameWithoutExt(f.name);
-        const img = new Image();
-        img.onload = () => {
-          frames.push({name, url, image: img, fileName: f.name});
-          renderList();
-          updateEmptyHint();
-          if(frames.length === 1) { resizeCanvas(); draw(); }
-        }
-        img.onerror = ()=>{ URL.revokeObjectURL(url); };
-        img.src = url;
-        img.decoding = "sync";
-      });
-    }
+    <!-- Controls -->
+    <div class="controls-top">
+      <div class="fps-control">
+        <label for="fps">FPS</label>
+        <input id="fps" type="number" min="1" value="12">
+      </div>
+      <div class="frame-actions">
+        <button id="sortBtn" class="ghost small">Sort (name)</button>
+        <button id="clearAll" class="ghost small">Clear all</button>
+      </div>
+    </div>
 
-    // Drop/File Events
-    ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('dragover');}));
-    ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('dragover');}));
-    drop.addEventListener('drop',e=>{ const dt = e.dataTransfer; if(dt && dt.files) addFiles(dt.files); });
-    fileInput.addEventListener('change',e=>{ addFiles(e.target.files); fileInput.value = ''; });
+    <!-- Frames list -->
+    <div class="frames" id="framesList"></div>
+    <div id="framesEmpty" class="frames-empty">Select a group to see its frames.</div>
 
-    function renderList(){
-      framesList.innerHTML = '';
-      frames.forEach((f, idx) => {
-        const el = document.createElement('div'); el.className='frame'; el.dataset.index = idx;
-        const img = document.createElement('img'); img.className='thumb'; img.src = f.url;
-        const meta = document.createElement('div'); meta.className='meta';
-        const name = document.createElement('div'); name.className='name'; name.textContent = f.name;
-        const fnameSmall = document.createElement('div'); fnameSmall.className='muted'; fnameSmall.style.fontSize='12px'; fnameSmall.textContent = f.fileName;
-        meta.appendChild(name); meta.appendChild(fnameSmall);
-        const ctrl = document.createElement('div'); ctrl.className='controls';
-        const remove = document.createElement('button'); remove.className='remove small'; remove.textContent='✕'; remove.onclick = (e)=>{e.stopPropagation(); removeAt(idx);};
-        ctrl.appendChild(remove);
-        el.appendChild(img); el.appendChild(meta); el.appendChild(ctrl);
-        
-        // Highlight current
-        if(idx === current) el.style.borderColor = '#0b63ff';
-        framesList.appendChild(el);
-      });
-      refreshSortable();
-      updateFrameIndexDisplay();
-    }
+    <div class="footer">Drag to reorder frames inside a group.</div>
+  </div>
 
-    function updateEmptyHint(){ emptyHint.style.display = frames.length ? 'none' : 'block'; }
+  <!-- RIGHT: Preview / Export -->
+  <div class="panel preview-wrap">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Preview</h2>
+      <div style="display:flex;gap:8px">
+        <button id="openExportModalBtn" class="success small">Export GIF</button>
+        <button id="exportSpriteBtn" class="success small">Export Sprite Sheet</button>
+      </div>
+    </div>
 
-    function removeAt(idx){
-      if(!frames[idx]) return;
-      URL.revokeObjectURL(frames[idx].url);
-      frames.splice(idx,1);
-      if(current >= frames.length) current = Math.max(0, frames.length-1);
-      renderList();
-      updateEmptyHint();
-      draw();
-    }
+    <div class="canvas-container checkerboard" id="canvasContainer">
+      <canvas id="canvas" class="preview-canvas"></canvas>
+    </div>
 
-    function clearAll(){ frames.forEach(f=>URL.revokeObjectURL(f.url)); frames=[]; current=0; stop(); renderList(); updateEmptyHint(); draw(); }
-    clearAllBtn.addEventListener('click', clearAll);
+    <div class="preview-controls">
+      <button id="playPause">Play</button>
+      <button id="stepBack" class="ghost small">◀</button>
+      <button id="stepForward" class="ghost small">▶</button>
+      <label class="muted">Loop group</label><input id="loopGroup" type="checkbox" checked>
+      <label class="muted">Auto switch group</label><input id="autoSwitchGroup" type="checkbox" checked>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <div class="muted">Frame:</div>
+        <div id="frameIndex">0 / 0</div>
+      </div>
+    </div>
 
-    let sortable = null;
-    function refreshSortable(){
-      if(sortable) { sortable.destroy(); sortable = null; }
-      sortable = new Sortable(framesList, {
-        animation: 150,
-        onEnd: ()=>{ 
-          const nodes = Array.from(framesList.children);
-          const newFrames = nodes.map(n => frames[Number(n.dataset.index)]);
-          frames = newFrames.filter(Boolean);
-          current = 0; // reset to start to avoid index confusion
-          renderList();
-          draw();
-        }
-      });
-    }
+    <div class="bg-controls">
+      <label style="font-weight:600">Background:</label>
+      <label><input type="radio" name="bgType" value="trans" > Transparent</label>
+      <label><input type="radio" name="bgType" value="color" checked> Color</label>
+      <input type="color" id="bgColorPicker" value="#000000" >
+    </div>
 
-    sortBtn.addEventListener('click', ()=>{ frames.sort((a,b) => a.name.localeCompare(b.name)); current = 0; renderList(); draw(); });
+    <div id="emptyHint" class="list-empty">No frames loaded.</div>
+  </div>
+</div>
 
-    function draw(){
-      // Draw Preview
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      if(frames.length === 0) {
-        canvas.width = 300; canvas.height = 150; // default size
-        return;
-      }
-
-      const img = frames[current].image;
-      if(!img) return;
-
-      // In Preview, we just draw the image at 100% size or scaled integers
-      // But actually, for preview clarity, let's keep canvas size = image size * integer scale to fit container
-      
-      const containerW = canvasContainer.clientWidth;
-      const containerH = canvasContainer.clientHeight;
-      const nw = img.naturalWidth || img.width;
-      const nh = img.naturalHeight || img.height;
-
-      // Calculate max integer scale that fits
-      let scale = Math.floor(Math.min((containerW-20)/nw, (containerH-20)/nh));
-      if (scale < 1) scale = 1;
-      
-      // Update canvas size
-      if(canvas.width !== nw*scale || canvas.height !== nh*scale){
-          canvas.width = nw*scale;
-          canvas.height = nh*scale;
-          ctx.imageSmoothingEnabled = false; // Reset whenever resize
-      }
-
-      // Draw
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(img, 0, 0, nw, nh, 0, 0, canvas.width, canvas.height);
-
-      // Highlight list
-      const allFrames = document.querySelectorAll('.frame');
-      allFrames.forEach((el, i) => el.style.borderColor = (i===current ? '#0b63ff' : '#eef2f7'));
-      updateFrameIndexDisplay();
-    }
-
-    function updateFrameIndexDisplay(){
-      frameIndexEl.textContent = frames.length ? (current+1) + ' / ' + frames.length : '0 / 0';
-    }
-
-    function play(){
-      if(frames.length <= 0) return;
-      const fps = Math.max(1, Number(fpsInput.value) || 12);
-      const interval = 1000 / fps;
-      stop();
-      playing = true; playPauseBtn.textContent='Pause';
-      timer = setInterval(()=>{
-        current++;
-        if(current >= frames.length){
-          if(loopToggle.checked) current = 0; else { current = frames.length-1; stop(); }
-        }
-        draw();
-      }, interval);
-    }
-    function stop(){ playing=false; playPauseBtn.textContent='Play'; if(timer){ clearInterval(timer); timer=null; } }
-
-    playPauseBtn.addEventListener('click', ()=>{ if(playing) stop(); else play(); });
-    fpsInput.addEventListener('change', ()=>{ if(playing) play(); });
-    stepBackBtn.addEventListener('click', ()=>{ if(frames.length>0){ current = (current-1+frames.length)%frames.length; draw(); }});
-    stepForwardBtn.addEventListener('click', ()=>{ if(frames.length>0){ current = (current+1)%frames.length; draw(); }});
-    framesList.addEventListener('click', e=>{
-      const el = e.target.closest('.frame'); if(!el) return; const idx = Number(el.dataset.index); if(!isNaN(idx)) { current = idx; draw(); }
-    });
-
-
-    // ------------------------------------------------
-    // GIF EXPORT LOGIC (Modified)
-    // ------------------------------------------------
-    
-    // 1. Open Modal
-    openExportModalBtn.addEventListener('click', () => {
-        if (frames.length === 0) { alert("Please add frames first!"); return; }
-        stop();
-        
-        // Init modal info
-        exportScaleInput.value = 10;
-        scaleValueDisplay.textContent = "10x";
-        
-        const f1 = frames[0].image;
-        const w = f1.naturalWidth || f1.width;
-        const h = f1.naturalHeight || f1.height;
-        
-        // Show current background choice
-        if(bgSettings.isTransparent) {
-            exportBgInfo.textContent = "Current Setting: Transparent Background";
-            exportBgInfo.style.color = "#555";
-        } else {
-            exportBgInfo.textContent = `Current Setting: Solid Color (${bgSettings.color})`;
-            exportBgInfo.style.color = bgSettings.color;
-            exportBgInfo.style.textShadow = "0 1px 2px rgba(0,0,0,0.1)";
-        }
-
-        updateFinalSize(w, h, 1);
-        exportModal.classList.add('active');
-    });
-
-    // 2. Modal Interactions
-    exportScaleInput.addEventListener('input', (e) => {
-        const s = e.target.value;
-        scaleValueDisplay.textContent = s + 'x';
-        if(frames.length > 0) {
-            const f1 = frames[0].image;
-            updateFinalSize(f1.naturalWidth, f1.naturalHeight, s);
-        }
-    });
-
-    function updateFinalSize(w, h, scale) {
-        finalSizeDisplay.textContent = `Original: ${w}x${h} → GIF: ${w*scale} x ${h*scale} px`;
-    }
-
-    cancelExportBtn.addEventListener('click', () => {
-        exportModal.classList.remove('active');
-    });
-
-    confirmExportBtn.addEventListener('click', () => {
-        const scale = Number(exportScaleInput.value) || 1;
-        renderGif(scale);
-        exportModal.classList.remove('active');
-    });
-
-    // 3. Render Function
-    function renderGif(scale) {
-        loader.classList.add('active');
-        loaderText.textContent = "Preparing...";
-
-        // Base dimensions from frame 0
-        const firstImg = frames[0].image;
-        const nw = firstImg.naturalWidth || firstImg.width;
-        const nh = firstImg.naturalHeight || firstImg.height;
-
-        const destW = nw * scale;
-        const destH = nh * scale;
-
-        // Worker blob
-        const workerBlob = new Blob(
-            ['importScripts("https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js");'],
-            { type: 'application/javascript' }
-        );
-        const workerUrl = URL.createObjectURL(workerBlob);
-
-        const gif = new GIF({
-            workers: 2,
-            quality: 1,
-            width: destW,
-            height: destH,
-            workerScript: workerUrl,
-            // If transparent, we define transparent color logic implicitly via alpha channel
-            transparent: bgSettings.isTransparent ? 0x00000000 : null 
-        });
-
-        // Temp canvas for rendering scaled frames
-        const tCanvas = document.createElement('canvas');
-        tCanvas.width = destW;
-        tCanvas.height = destH;
-        const tCtx = tCanvas.getContext('2d');
-        tCtx.imageSmoothingEnabled = false; // CRITICAL for pixel art
-
-        const fps = Math.max(1, Number(fpsInput.value) || 12);
-        const delay = 1000 / fps; // gif.js takes delay in ms
-
-        frames.forEach((f, i) => {
-            // Clear
-            tCtx.clearRect(0,0,destW,destH);
-
-            // 1. Fill Background if NOT transparent
-            if(!bgSettings.isTransparent) {
-                tCtx.fillStyle = bgSettings.color;
-                tCtx.fillRect(0,0,destW,destH);
-            }
-
-            // 2. Draw Image (Scaled)
-            // drawImage(img, srcX, srcY, srcW, srcH, destX, destY, destW, destH)
-            const iw = f.image.naturalWidth || f.image.width;
-            const ih = f.image.naturalHeight || f.image.height;
-            
-            // Center logic if sizes differ (optional, assuming mostly same size)
-            const dx = Math.floor((destW - iw*scale)/2);
-            const dy = Math.floor((destH - ih*scale)/2);
-
-            tCtx.drawImage(f.image, 0, 0, iw, ih, dx, dy, iw*scale, ih*scale);
-
-            // 3. Add to GIF
-            gif.addFrame(tCtx, {copy: true, delay: delay});
-        });
-
-        gif.on('progress', (p) => {
-            loaderText.textContent = `Encoding GIF: ${Math.round(p * 100)}%`;
-        });
-
-        gif.on('finished', (blob) => {
-            loader.classList.remove('active');
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `animation-${destW}x${destH}.gif`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => { URL.revokeObjectURL(url); URL.revokeObjectURL(workerUrl); }, 1000);
-        });
-
-        gif.render();
-    }
-
-    // Init
-    updateEmptyHint();
-
-    exportSpriteBtn.addEventListener('click', () => {
-      if(frames.length === 0) { alert("Please add frames first!"); return; }
-
-      stop();
-
-      const scale = Number(exportScaleInput.value) || 1;
-      const firstImg = frames[0].image;
-      const nw = firstImg.naturalWidth || firstImg.width;
-      const nh = firstImg.naturalHeight || firstImg.height;
-
-      const destW = nw * scale;
-      const destH = nh * scale;
-
-      // Sprite sheet canvas
-      const spriteCanvas = document.createElement('canvas');
-      spriteCanvas.width = destW * frames.length; // 1 hàng ngang
-      spriteCanvas.height = destH;
-      const sCtx = spriteCanvas.getContext('2d');
-      sCtx.imageSmoothingEnabled = false;
-
-      frames.forEach((f, i) => {
-          // Fill background
-          if(!bgSettings.isTransparent) {
-              sCtx.fillStyle = bgSettings.color;
-              sCtx.fillRect(i * destW, 0, destW, destH);
-          }
-
-          const iw = f.image.naturalWidth || f.image.width;
-          const ih = f.image.naturalHeight || f.image.height;
-
-          // Centering
-          const dx = i * destW + Math.floor((destW - iw*scale)/2);
-          const dy = Math.floor((destH - ih*scale)/2);
-
-          sCtx.drawImage(f.image, 0, 0, iw, ih, dx, dy, iw*scale, ih*scale);
-      });
-
-      // Export as PNG
-      spriteCanvas.toBlob((blob) => {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `sprite-${destW}x${destH}.png`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          setTimeout(()=>URL.revokeObjectURL(url), 1000);
-      });
-  });
-
-  </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+<script src="script.js"></script>
+<script src="export_gif.js"></script>
+<script src="export_spritesheet.js"></script>
 </body>
+
 </html>
